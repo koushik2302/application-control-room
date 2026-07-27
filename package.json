@@ -1,0 +1,36 @@
+{
+  "name": "control-room",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n web,api -c blue,green \"vite\" \"node server/index.js\"",
+    "server": "node server/index.js",
+    "build": "vite build",
+    "start": "npm run build && node server/index.js",
+    "build:exe": "npm run build && node scripts/bundle-server.mjs && pkg server-bundle/server.cjs --targets node22-win-x64 --output release/ApplicationControlRoom.exe && node scripts/finish-release.js",
+    "lint": "oxlint",
+    "preview": "vite preview"
+  },
+  "bin": "server/index.js",
+  "pkg": {
+    "assets": []
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "@yao-pkg/pkg": "^6.21.0",
+    "concurrently": "^10.0.4",
+    "esbuild": "^0.28.1",
+    "oxlint": "^1.71.0",
+    "vite": "^8.1.1"
+  }
+}

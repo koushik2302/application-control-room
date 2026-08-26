@@ -34,3 +34,4 @@ autofill-browser-profile/
 *.njsproj
 *.sln
 *.sw?
+CHANGELOG.md

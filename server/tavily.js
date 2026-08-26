@@ -11,7 +11,7 @@ function apiKey() {
 // Tavily doesn't support Google-style "site:" operators in the query string
 // (they get silently stripped) — use includeDomains instead for real
 // domain restriction.
-export async function tavilySearch(query, { maxResults = 10, includeDomains } = {}) {
+export async function tavilySearch(query, { maxResults = 10, includeDomains, excludeDomains } = {}) {
   const response = await fetch(TAVILY_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -21,6 +21,7 @@ export async function tavilySearch(query, { maxResults = 10, includeDomains } = 
       max_results: maxResults,
       search_depth: "advanced",
       ...(includeDomains ? { include_domains: includeDomains } : {}),
+      ...(excludeDomains ? { exclude_domains: excludeDomains } : {}),
     }),
   });
 

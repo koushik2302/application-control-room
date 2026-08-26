@@ -18,6 +18,12 @@ release/
 server-bundle/
 *.exe
 
+# Live Playwright browser profile (cookies/session state) - never commit
+autofill-browser-profile/
+
+# Claude Code local settings
+.claude/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

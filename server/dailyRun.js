@@ -1,12 +1,19 @@
-import { getData, setTickets, appendRunLog } from "./store.js";
+import { getData, setTickets, appendRunLog, nextTicketId } from "./store.js";
 import { search, tailor } from "./llm.js";
+import { generateResumePdf } from "./resume.js";
+import { generateCoverLetterPdf } from "./coverLetter.js";
 
 const MATCH_THRESHOLD = 60;
 const MAX_NEW_TICKETS_PER_QUERY = 3;
-
-function ticketId(n) {
-  return `APP-${String(n).padStart(3, "0")}`;
-}
+// The search-stage matchScore is a rough relevance estimate off a short
+// snippet; tailor()'s matchScore is a real ATS-style score computed against
+// the candidate's actual profile. A low tailored score even after search
+// judged it relevant is a strong signal the "JD" was too vague/generic to
+// tailor against meaningfully -- in practice this reliably flags generic
+// company careers-landing pages (e.g. "IBM Internships", "Apprenticeships")
+// that individually-specific-posting checks upstream didn't catch, since
+// they're real company domains with plausible-looking titles.
+const MIN_TAILORED_SCORE = 50;
 
 function alreadySeen(tickets, r) {
   return tickets.some(
@@ -52,8 +59,14 @@ export async function runDailyCycle({ trigger = "cron" } = {}) {
         try {
           const jd = `${r.snippet || ""}${r.url ? `\n\nSource: ${r.url}` : ""}`;
           const tailored = await tailor({ profile, company: r.company, role: r.role, jd });
+          if ((tailored.matchScore ?? 0) < MIN_TAILORED_SCORE) {
+            summary.errors.push(
+              `Skipped ${r.company} / ${r.role}: tailored match score ${tailored.matchScore} is below ${MIN_TAILORED_SCORE} -- likely a generic landing page rather than a specific posting.`
+            );
+            continue;
+          }
           const ticket = {
-            id: ticketId(tickets.length + 1),
+            id: nextTicketId(tickets),
             company: r.company || "—",
             role: r.role || "—",
             date: new Date().toISOString().slice(0, 10),
@@ -61,11 +74,25 @@ export async function runDailyCycle({ trigger = "cron" } = {}) {
             matchScore: tailored.matchScore,
             missing: tailored.missing,
             tailoredBullets: tailored.tailoredBullets,
+            tailoredEntries: tailored.tailoredEntries,
+            jd,
             sourceUrl: r.url || "",
             platform: r.platform || "",
             postedRecency: r.postedRecency || "",
+            location: r.location || "",
             auto: true,
           };
+          try {
+            ticket.resumeUrl = await generateResumePdf({ profile, ticket });
+          } catch (e) {
+            summary.errors.push(`Resume PDF failed for ${r.company} / ${r.role}: ${e.message}`);
+          }
+          try {
+            const coverLetterUrl = await generateCoverLetterPdf({ profile, ticket });
+            if (coverLetterUrl) ticket.coverLetterUrl = coverLetterUrl;
+          } catch (e) {
+            summary.errors.push(`Cover letter failed for ${r.company} / ${r.role}: ${e.message}`);
+          }
           tickets = [ticket, ...tickets];
           qSummary.added += 1;
           summary.added += 1;

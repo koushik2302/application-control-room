@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Control Room Autofill",
+  "version": "0.1.0",
+  "description": "Fills a job application form on the tab you're already on, using your Control Room profile. Never submits anything.",
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": ["activeTab", "scripting", "storage", "debugger"],
+  "host_permissions": ["http://localhost:3001/*"]
+}

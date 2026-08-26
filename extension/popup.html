@@ -1,0 +1,95 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Control Room Autofill</title>
+    <style>
+      body {
+        width: 320px;
+        margin: 0;
+        padding: 14px;
+        font: 13px "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+        color: #1b1d21;
+        background: #f3f1ec;
+      }
+      h1 {
+        font-size: 14px;
+        margin: 0 0 10px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      select,
+      button {
+        font: inherit;
+        padding: 6px 8px;
+        border-radius: 4px;
+        border: 1px solid #b9b4a8;
+        background: #fff;
+      }
+      select {
+        flex: 1;
+      }
+      button.primary {
+        width: 100%;
+        background: #e20015;
+        color: #fff;
+        border: none;
+        font-weight: 600;
+        padding: 9px;
+        cursor: pointer;
+        margin-top: 4px;
+      }
+      button.primary:disabled {
+        background: #c9a4a8;
+        cursor: default;
+      }
+      label.toggle {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: #565c63;
+        margin: 10px 0;
+      }
+      #status {
+        margin-top: 10px;
+        font-size: 12px;
+        color: #565c63;
+        white-space: pre-wrap;
+      }
+      #status.error {
+        color: #e20015;
+      }
+      .hint {
+        font-size: 11px;
+        color: #8b9098;
+        margin-top: 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Control Room Autofill</h1>
+
+    <div class="row">
+      <select id="ticket"></select>
+    </div>
+    <div class="hint">For the resume/cover-letter file, if you use auto-upload below.</div>
+
+    <label class="toggle">
+      <input type="checkbox" id="autoUpload" />
+      Auto-upload resume/cover letter (shows Chrome's "being debugged" banner briefly)
+    </label>
+
+    <button id="run" class="primary">Autofill application</button>
+    <div class="hint">Fills this page, then walks through Save/Continue up to Review. Never clicks Submit.</div>
+
+    <div id="status"></div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -18,10 +18,22 @@ function useFonts() {
 
 const emptyProfile = {
   name: "",
+  tagline: "",
+  email: "",
+  phone: "",
+  location: "",
+  address: "",
+  city: "",
+  pincode: "",
+  linkedin: "",
+  github: "",
+  portfolio: "",
   summary: "",
+  education: "",
   experience: "",
   projects: "",
   skills: "",
+  certifications: "",
 };
 
 function statusColor(status) {
@@ -53,6 +65,7 @@ export default function App() {
   useFonts();
   const [tab, setTab] = useState("tailor");
   const [profile, setProfile] = useState(emptyProfile);
+  const [profileLoaded, setProfileLoaded] = useState(false);
   const [tickets, setTickets] = useState([]);
   const [watchlist, setWatchlist] = useState([]);
   const [runLog, setRunLog] = useState([]);
@@ -75,13 +88,27 @@ export default function App() {
   const [runTriggering, setRunTriggering] = useState(false);
   const [runError, setRunError] = useState("");
 
+  const [autofillingId, setAutofillingId] = useState(null);
+  const [autofillResults, setAutofillResults] = useState({}); // ticket id -> summary or {error}
+
   // ---- load persisted data from the local backend ----
   useEffect(() => {
-    api("/profile").then(setProfile).catch(() => {});
+    api("/profile")
+      .then(setProfile)
+      .catch(() => {})
+      .finally(() => setProfileLoaded(true));
     api("/tickets").then(setTickets).catch(() => {});
     api("/watchlist").then(setWatchlist).catch(() => {});
     api("/run-log").then(setRunLog).catch(() => {});
   }, []);
+
+  // First-run gate: a brand-new install (empty profile) forces the Profile
+  // tab until real experience/projects are entered, so a new user can't end
+  // up tailoring or tracking against a blank resume.
+  const needsOnboarding = profileLoaded && !profile.experience && !profile.projects;
+  useEffect(() => {
+    if (needsOnboarding) setTab("profile");
+  }, [needsOnboarding]);
 
   const saveProfile = useCallback(async (next) => {
     setProfile(next);
@@ -170,21 +197,17 @@ export default function App() {
 
   async function logTicket() {
     if (!result) return;
-    const next = [
-      {
-        id: `APP-${String(tickets.length + 1).padStart(3, "0")}`,
-        company: company || "—",
-        role: role || "—",
-        date: new Date().toISOString().slice(0, 10),
-        status: "Draft",
-        matchScore: result.matchScore,
-        missing: result.missing,
-        tailoredBullets: result.tailoredBullets,
-      },
-      ...tickets,
-    ];
-    await saveTickets(next);
-    setTab("tracker");
+    try {
+      const next = await api("/tickets/log", {
+        method: "POST",
+        body: JSON.stringify({ company, role, jd, tailored: result }),
+      });
+      setTickets(next);
+      setTab("tracker");
+    } catch (e) {
+      console.error("log ticket failed", e);
+      setError(e.message || "Couldn't log the ticket. Try again.");
+    }
   }
 
   async function updateStatus(id, status) {
@@ -195,6 +218,22 @@ export default function App() {
   async function removeTicket(id) {
     const next = tickets.filter((t) => t.id !== id);
     await saveTickets(next);
+  }
+
+  // Opens the real posting in a visible browser window and fills in what it
+  // can from the profile -- see server/autofill.js for the full guardrails.
+  // Never submits anything; the window is left open for manual review.
+  async function autofill(id) {
+    setAutofillingId(id);
+    setAutofillResults((prev) => ({ ...prev, [id]: null }));
+    try {
+      const summary = await api(`/tickets/${id}/autofill`, { method: "POST" });
+      setAutofillResults((prev) => ({ ...prev, [id]: summary }));
+    } catch (e) {
+      setAutofillResults((prev) => ({ ...prev, [id]: { error: e.message || "Autofill failed." } }));
+    } finally {
+      setAutofillingId(null);
+    }
   }
 
   function addWatch() {
@@ -397,16 +436,32 @@ export default function App() {
         <div style={styles.eyebrow}>Application Control Room — local</div>
         <h1 style={styles.h1}>Ticket every application like an incident — tailored, tracked, resolved.</h1>
         <div style={styles.tabs}>
-          <button style={styles.tabBtn(tab === "search")} onClick={() => setTab("search")}>
+          <button
+            style={{ ...styles.tabBtn(tab === "search"), opacity: needsOnboarding ? 0.4 : 1 }}
+            onClick={() => !needsOnboarding && setTab("search")}
+            disabled={needsOnboarding}
+          >
             Search
           </button>
-          <button style={styles.tabBtn(tab === "tailor")} onClick={() => setTab("tailor")}>
+          <button
+            style={{ ...styles.tabBtn(tab === "tailor"), opacity: needsOnboarding ? 0.4 : 1 }}
+            onClick={() => !needsOnboarding && setTab("tailor")}
+            disabled={needsOnboarding}
+          >
             Tailor
           </button>
-          <button style={styles.tabBtn(tab === "tracker")} onClick={() => setTab("tracker")}>
+          <button
+            style={{ ...styles.tabBtn(tab === "tracker"), opacity: needsOnboarding ? 0.4 : 1 }}
+            onClick={() => !needsOnboarding && setTab("tracker")}
+            disabled={needsOnboarding}
+          >
             Tracker ({tickets.length})
           </button>
-          <button style={styles.tabBtn(tab === "watchlist")} onClick={() => setTab("watchlist")}>
+          <button
+            style={{ ...styles.tabBtn(tab === "watchlist"), opacity: needsOnboarding ? 0.4 : 1 }}
+            onClick={() => !needsOnboarding && setTab("watchlist")}
+            disabled={needsOnboarding}
+          >
             Watchlist ({watchlist.length})
           </button>
           <button style={styles.tabBtn(tab === "profile")} onClick={() => setTab("profile")}>
@@ -418,6 +473,22 @@ export default function App() {
       <div style={styles.body}>
         {tab === "profile" && (
           <div style={styles.card}>
+            {needsOnboarding && (
+              <div
+                style={{
+                  background: "#FBF1DC",
+                  border: "1px solid #E0C88A",
+                  borderRadius: 4,
+                  padding: 12,
+                  marginBottom: 16,
+                  fontSize: 13,
+                  color: "#6B5417",
+                }}
+              >
+                Welcome — fill in your real Experience and Projects below before anything else unlocks. Nothing gets
+                tailored, searched, or tracked against a blank resume.
+              </div>
+            )}
             <label style={styles.label}>Name</label>
             <input
               style={styles.input}
@@ -425,12 +496,89 @@ export default function App() {
               onChange={(e) => saveProfile({ ...profile, name: e.target.value })}
               placeholder="Your name"
             />
+            <label style={styles.label}>Tagline (shown under your name on the resume)</label>
+            <input
+              style={styles.input}
+              value={profile.tagline}
+              onChange={(e) => saveProfile({ ...profile, tagline: e.target.value })}
+              placeholder='e.g. "MBA (Operations), Business Analytics Minor — Targeting Operations & Analyst Roles"'
+            />
+            <label style={styles.label}>Email</label>
+            <input
+              style={styles.input}
+              value={profile.email}
+              onChange={(e) => saveProfile({ ...profile, email: e.target.value })}
+              placeholder="you@email.com"
+            />
+            <label style={styles.label}>Phone</label>
+            <input
+              style={styles.input}
+              value={profile.phone}
+              onChange={(e) => saveProfile({ ...profile, phone: e.target.value })}
+              placeholder="+91 ..."
+            />
+            <label style={styles.label}>Location</label>
+            <input
+              style={styles.input}
+              value={profile.location}
+              onChange={(e) => saveProfile({ ...profile, location: e.target.value })}
+              placeholder="e.g. Bengaluru, India"
+            />
+            <label style={styles.label}>Address (street, for autofill address fields)</label>
+            <input
+              style={styles.input}
+              value={profile.address}
+              onChange={(e) => saveProfile({ ...profile, address: e.target.value })}
+              placeholder="e.g. 105, Central Excise Revenue Layout-2, near Anjaneya Temple, S.K.Nagar post"
+            />
+            <label style={styles.label}>City (for autofill city fields)</label>
+            <input
+              style={styles.input}
+              value={profile.city}
+              onChange={(e) => saveProfile({ ...profile, city: e.target.value })}
+              placeholder="e.g. Bangalore"
+            />
+            <label style={styles.label}>Pincode (for autofill PIN/postal fields)</label>
+            <input
+              style={styles.input}
+              value={profile.pincode}
+              onChange={(e) => saveProfile({ ...profile, pincode: e.target.value })}
+              placeholder="e.g. 560077"
+            />
+            <label style={styles.label}>LinkedIn</label>
+            <input
+              style={styles.input}
+              value={profile.linkedin}
+              onChange={(e) => saveProfile({ ...profile, linkedin: e.target.value })}
+              placeholder="linkedin.com/in/..."
+            />
+            <label style={styles.label}>GitHub</label>
+            <input
+              style={styles.input}
+              value={profile.github}
+              onChange={(e) => saveProfile({ ...profile, github: e.target.value })}
+              placeholder="github.com/..."
+            />
+            <label style={styles.label}>Portfolio</label>
+            <input
+              style={styles.input}
+              value={profile.portfolio}
+              onChange={(e) => saveProfile({ ...profile, portfolio: e.target.value })}
+              placeholder="yourportfolio.com"
+            />
             <label style={styles.label}>Summary</label>
             <textarea
               style={styles.textarea}
               value={profile.summary}
               onChange={(e) => saveProfile({ ...profile, summary: e.target.value })}
               placeholder="2-3 line professional summary"
+            />
+            <label style={styles.label}>Education (one per line, e.g. "PES University — MBA, Operations & Business Analytics — Class of 2027")</label>
+            <textarea
+              style={{ ...styles.textarea, minHeight: 60 }}
+              value={profile.education}
+              onChange={(e) => saveProfile({ ...profile, education: e.target.value })}
+              placeholder="School — Degree — Year"
             />
             <label style={styles.label}>Experience (real bullets, one per line)</label>
             <textarea
@@ -446,12 +594,19 @@ export default function App() {
               onChange={(e) => saveProfile({ ...profile, projects: e.target.value })}
               placeholder="e.g. Built a discrete-event queue simulation in Python/SimPy..."
             />
-            <label style={styles.label}>Skills</label>
+            <label style={styles.label}>Skills (one category per line: "Category: comma, separated, items")</label>
             <textarea
               style={styles.textarea}
               value={profile.skills}
               onChange={(e) => saveProfile({ ...profile, skills: e.target.value })}
-              placeholder="Comma-separated skills"
+              placeholder="Operations: Process improvement, root-cause analysis...&#10;Technical: Python, SQL, ..."
+            />
+            <label style={styles.label}>Certifications (one per line, e.g. "Name — Issuer, Year")</label>
+            <textarea
+              style={{ ...styles.textarea, minHeight: 60 }}
+              value={profile.certifications}
+              onChange={(e) => saveProfile({ ...profile, certifications: e.target.value })}
+              placeholder="Lean Six Sigma: Green Belt Fundamentals — Alison, 2026"
             />
             <div style={{ fontSize: 12, color: "#8A8578" }}>
               Saved locally to server/data.json on this machine. This is your real resume content — the tailoring step only rewrites phrasing, never invents facts.
@@ -670,13 +825,84 @@ export default function App() {
                   </span>
                   <span style={styles.statusPill(t.status)}>{t.status}</span>
                 </div>
-                <div style={{ fontWeight: 600, fontSize: 15 }}>{t.role}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ fontWeight: 600, fontSize: 15 }}>{t.role}</div>
+                  {t.resumeUrl && (
+                    <a
+                      href={t.resumeUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      download
+                      style={{
+                        fontFamily: "'IBM Plex Mono', monospace",
+                        fontSize: 11,
+                        color: "#0E6E6A",
+                        border: "1px solid #0E6E6A",
+                        borderRadius: 4,
+                        padding: "2px 8px",
+                        textDecoration: "none",
+                      }}
+                    >
+                      ↓ Resume PDF
+                    </a>
+                  )}
+                  {t.coverLetterUrl && (
+                    <a
+                      href={t.coverLetterUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      download
+                      style={{
+                        fontFamily: "'IBM Plex Mono', monospace",
+                        fontSize: 11,
+                        color: "#0E6E6A",
+                        border: "1px solid #0E6E6A",
+                        borderRadius: 4,
+                        padding: "2px 8px",
+                        textDecoration: "none",
+                      }}
+                    >
+                      ↓ Cover Letter
+                    </a>
+                  )}
+                </div>
                 <div style={{ fontSize: 13, color: "#8A8578", marginBottom: 10 }}>{t.company} · match {t.matchScore}/100</div>
                 {t.sourceUrl && (
-                  <div style={{ marginBottom: 10 }}>
+                  <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                     <a href={t.sourceUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "#0E6E6A" }}>
                       Open posting ↗
                     </a>
+                    <button
+                      style={styles.btnGhost}
+                      disabled={autofillingId === t.id}
+                      onClick={() => autofill(t.id)}
+                    >
+                      {autofillingId === t.id ? "Filling form…" : "Autofill application"}
+                    </button>
+                  </div>
+                )}
+                {autofillResults[t.id] && (
+                  <div
+                    style={{
+                      fontSize: 12,
+                      marginBottom: 10,
+                      padding: "8px 10px",
+                      borderRadius: 4,
+                      background: autofillResults[t.id].error ? "#FBEAEA" : "#F0F5F0",
+                      color: autofillResults[t.id].error ? "#B23A2E" : "#3D5A45",
+                    }}
+                  >
+                    {autofillResults[t.id].error ? (
+                      autofillResults[t.id].error
+                    ) : (
+                      <>
+                        Filled {autofillResults[t.id].filled?.length || 0} field(s), uploaded{" "}
+                        {autofillResults[t.id].fileUploads?.length || 0} file(s), drafted{" "}
+                        {autofillResults[t.id].drafted?.length || 0} answer(s) for review, skipped{" "}
+                        {autofillResults[t.id].skipped?.length || 0} — check the browser window and review before
+                        submitting.
+                      </>
+                    )}
                   </div>
                 )}
                 {t.missing?.length > 0 && (

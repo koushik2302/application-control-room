@@ -1,14 +1,16 @@
+import "./env.js";
+import fs from "fs";
 import path from "path";
 import { baseDir } from "./paths.js";
-import dotenv from "dotenv";
-dotenv.config({ path: path.join(baseDir, ".env") });
-
 import express from "express";
 import cors from "cors";
-import { getData, setProfile, setTickets, setWatchlist } from "./store.js";
+import { getData, setProfile, setTickets, setWatchlist, DATA_DIR, nextTicketId } from "./store.js";
 import { tailor, search } from "./llm.js";
+import { generateResumePdf, regenerateAllResumes, resumeFilePath } from "./resume.js";
+import { generateCoverLetterPdf, regenerateAllCoverLetters, coverLetterFilePath } from "./coverLetter.js";
 import { runDailyCycle } from "./dailyRun.js";
 import { scheduleDaily } from "./schedule.js";
+import { autofillApplication } from "./autofill.js";
 
 const PORT = process.env.PORT || 3001;
 const DAILY_RUN_TIME = process.env.ACR_DAILY_TIME || "08:00"; // server local time, HH:MM
@@ -27,12 +29,64 @@ function alreadyRanToday() {
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
+app.use("/resumes", express.static(path.join(DATA_DIR, "resumes")));
 
 app.get("/api/profile", (req, res) => res.json(getData().profile));
-app.put("/api/profile", (req, res) => res.json(setProfile(req.body)));
+
+// Every profile save re-renders every existing ticket's resume PDF (and
+// cover letter) against it, so contact info / education / summary edits —
+// and any future tweak to either document's layout — never go stale next
+// to a tracker entry.
+app.put("/api/profile", async (req, res) => {
+  try {
+    const profile = setProfile(req.body);
+    let tickets = await regenerateAllResumes({ profile, tickets: getData().tickets });
+    tickets = await regenerateAllCoverLetters({ profile, tickets });
+    setTickets(tickets);
+    res.json(profile);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 app.get("/api/tickets", (req, res) => res.json(getData().tickets));
 app.put("/api/tickets", (req, res) => res.json(setTickets(req.body)));
+
+// Logs a newly-confirmed match: assigns the ticket id, renders a resume PDF
+// tailored to this JD from the real profile content, and stores both.
+app.post("/api/tickets/log", async (req, res) => {
+  try {
+    const { company, role, jd, tailored, sourceUrl, platform, postedRecency } = req.body;
+    const data = getData();
+    const ticket = {
+      id: nextTicketId(data.tickets),
+      company: company || "—",
+      role: role || "—",
+      date: new Date().toISOString().slice(0, 10),
+      status: "Draft",
+      matchScore: tailored?.matchScore,
+      missing: tailored?.missing,
+      tailoredBullets: tailored?.tailoredBullets,
+      tailoredEntries: tailored?.tailoredEntries,
+      // Kept so this ticket's resume can be re-tailored later (e.g. after a
+      // profile edit) without asking the user to re-paste the JD.
+      ...(jd ? { jd } : {}),
+      ...(sourceUrl ? { sourceUrl } : {}),
+      ...(platform ? { platform } : {}),
+      ...(postedRecency ? { postedRecency } : {}),
+    };
+    ticket.resumeUrl = await generateResumePdf({ profile: data.profile, ticket });
+    const coverLetterUrl = await generateCoverLetterPdf({ profile: data.profile, ticket });
+    if (coverLetterUrl) ticket.coverLetterUrl = coverLetterUrl;
+    const next = [ticket, ...data.tickets];
+    setTickets(next);
+    res.json(next);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 app.get("/api/watchlist", (req, res) => res.json(getData().watchlist));
 app.put("/api/watchlist", (req, res) => res.json(setWatchlist(req.body)));
@@ -59,6 +113,44 @@ app.post("/api/search", async (req, res) => {
     console.error(e);
     res.status(500).json({ error: e.message });
   }
+});
+
+// Opens the real posting in a visible browser window and fills in whatever
+// it can from the profile (contact fields, resume/cover-letter file
+// uploads, drafted answers for essay questions) -- never clicks
+// Submit/Apply/anything, and never touches password/account-creation
+// fields. See autofill.js for the full guardrails. The browser window is
+// left open for the user to review and submit manually.
+app.post("/api/tickets/:id/autofill", async (req, res) => {
+  try {
+    const data = getData();
+    const ticket = data.tickets.find((t) => t.id === req.params.id);
+    if (!ticket) return res.status(404).json({ error: "Ticket not found." });
+    if (!ticket.sourceUrl) return res.status(400).json({ error: "This ticket has no posting URL to open." });
+    const summary = await autofillApplication({ profile: data.profile, ticket });
+    res.json(summary);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Absolute on-disk paths for a ticket's generated resume/cover-letter PDFs.
+// Only useful to something running on this same machine (the browser
+// extension's background script, via chrome.debugger's DOM.setFileInputFiles,
+// which needs a real filesystem path rather than a URL/blob) -- same
+// same-machine trust boundary the rest of this unauthenticated local app
+// already assumes.
+app.get("/api/tickets/:id/files", (req, res) => {
+  const data = getData();
+  const ticket = data.tickets.find((t) => t.id === req.params.id);
+  if (!ticket) return res.status(404).json({ error: "Ticket not found." });
+  const resume = resumeFilePath(ticket);
+  const coverLetter = coverLetterFilePath(ticket);
+  res.json({
+    resumePath: resume && fs.existsSync(resume) ? resume : null,
+    coverLetterPath: coverLetter && fs.existsSync(coverLetter) ? coverLetter : null,
+  });
 });
 
 // Manual trigger for the daily automation, so you can test it without waiting
@@ -109,8 +201,24 @@ async function runDailyIfDue(trigger) {
   }
 }
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Application Control Room server running on http://localhost:${PORT}`);
+
+  // Refresh every ticket's resume PDF and cover letter on boot, so a code
+  // change to either layout (or a data.json edited by hand) can't leave
+  // stale documents behind.
+  try {
+    const data = getData();
+    if (data.tickets.length) {
+      let tickets = await regenerateAllResumes({ profile: data.profile, tickets: data.tickets });
+      tickets = await regenerateAllCoverLetters({ profile: data.profile, tickets });
+      setTickets(tickets);
+      console.log(`Refreshed ${tickets.length} resume PDF(s)/cover letter(s) against the current profile/layout.`);
+    }
+  } catch (e) {
+    console.error("Startup resume refresh failed:", e);
+  }
+
   if (process.env.ACR_DISABLE_CRON !== "1") {
     // Catch-up run: if the server just started (e.g. laptop was just turned on)
     // on an allowed day and no run has happened yet today, run now instead of

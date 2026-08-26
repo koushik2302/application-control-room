@@ -2,11 +2,24 @@ import fs from "fs";
 import path from "path";
 import { baseDir } from "./paths.js";
 
-const DATA_DIR = process.env.ACR_DATA_DIR || path.join(baseDir, "data");
+export const DATA_DIR = process.env.ACR_DATA_DIR || path.join(baseDir, "data");
 const DATA_FILE = path.join(DATA_DIR, "data.json");
 
 const empty = {
-  profile: { name: "", summary: "", experience: "", projects: "", skills: "" },
+  profile: {
+    name: "",
+    email: "",
+    phone: "",
+    location: "",
+    linkedin: "",
+    github: "",
+    portfolio: "",
+    summary: "",
+    education: "",
+    experience: "",
+    projects: "",
+    skills: "",
+  },
   tickets: [],
   watchlist: [],
   runLog: [],
@@ -59,4 +72,15 @@ export function appendRunLog(entry) {
   data.runLog = [entry, ...data.runLog].slice(0, 100);
   save();
   return data.runLog;
+}
+
+// Based on the highest existing ticket number, not array length — length
+// undercounts once any ticket has ever been deleted, which previously caused
+// new tickets to collide with (and overwrite) an existing id.
+export function nextTicketId(tickets) {
+  const max = tickets.reduce((m, t) => {
+    const n = Number(String(t.id || "").replace("APP-", ""));
+    return Number.isFinite(n) && n > m ? n : m;
+  }, 0);
+  return `APP-${String(max + 1).padStart(3, "0")}`;
 }

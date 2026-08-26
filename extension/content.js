@@ -182,7 +182,17 @@ window.__acrFill = function (profile, settings) {
 
   const result = { filled: [], skipped: [], fileFields: [] };
 
-  const inputs = Array.from(document.querySelectorAll("input, textarea, select")).filter(isVisible);
+  // File inputs are excluded from the isVisible() filter: Workday (and other
+  // ATS platforms) routinely render the real <input type="file"> invisible on
+  // purpose, with a custom drag-and-drop dropzone sitting visually on top of
+  // it (confirmed on a real Jabil posting -- the resume field never showed up
+  // in fileFields at all, because the hidden input failed isVisible() and got
+  // dropped before the file-handling branch below ever saw it). The desktop
+  // autofillWorker.js already special-cases this the same way; the extension
+  // just hadn't caught up.
+  const inputs = Array.from(document.querySelectorAll("input, textarea, select")).filter(
+    (el) => (el.type || "").toLowerCase() === "file" || isVisible(el)
+  );
 
   // How many "Address Line N" fields this particular form has, so the
   // address can be split across them instead of the same full string

@@ -380,6 +380,17 @@ function isCareerPageUrl(url) {
 // gets dropped too -- acceptable here, since the pipeline already treats "empty
 // is correct sometimes" as better than storing a bad entry (see dailyRun.js's
 // MIN_TAILORED_SCORE floor and the searchNotes philosophy).
+// A blog/news/culture-page URL path segment -- these are the company-domain
+// pages that most often carry a plausible-looking "numeric id" that isn't one
+// at all: a calendar year. Real-world catch: APP-028 (Blueyonder) was
+// "/about/our-culture/dive-in/2026/apprentice-spotlight-building-the-future"
+// -- a company culture blog post, not a posting -- and the bare "2026" in the
+// path satisfied the numeric-id-in-path check below since a year is 4 digits,
+// same shape as a real requisition id. Checked first, independent of the
+// numeric-id heuristic, so no year-in-path guessing is needed there.
+const ARTICLE_PATH_RE =
+  /\/(blog|blogs|news|newsroom|press|press-release|stories|story|insights|culture|our-culture|dive-in|spotlight|articles|editorial)(\/|$)/i;
+
 function looksLikeSpecificPosting(url) {
   const full = url.toLowerCase();
   let path;
@@ -388,6 +399,7 @@ function looksLikeSpecificPosting(url) {
   } catch {
     return false;
   }
+  if (ARTICLE_PATH_RE.test(path)) return false;
   const numericIdInPath = /\/\d{4,}(\/|$)/.test(path);
   const numericIdInQuery = /(gh_jid|jobid|job_id|reqid|req_id|requisitionid|pid|posting|vacancyid|jobreqid)=\d{3,}/.test(full);
   const atsJobPath =

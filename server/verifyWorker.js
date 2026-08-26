@@ -101,6 +101,7 @@ async function verifyOne(page, url) {
       const metaSite = document.querySelector('meta[property="og:site_name"]')?.content || "";
       const bodyText = (document.body?.innerText || "").slice(0, 4000);
       return {
+        hasJobPosting: !!jp,
         title: (jp && jp.title) || document.title || "",
         company: (jp && jp.hiringOrganization && (jp.hiringOrganization.name || jp.hiringOrganization)) || metaSite || "",
         location: locString(jp),
@@ -109,6 +110,18 @@ async function verifyOne(page, url) {
         bodyText,
       };
     });
+
+    // Hard requirement, not best-effort: without real JobPosting JSON-LD, all
+    // we have is a page that loaded -- title/company/location above would be
+    // falling back to document.title/og:site_name/a body-text keyword scan,
+    // which a blog/article page satisfies just as easily as a real posting
+    // (caught live: APP-028, a Blueyonder "Apprentice Spotlight" culture post,
+    // whose body text happened to mention "Bengaluru" and so passed the old
+    // location check). "Dropped, not stored on faith" only holds if this is
+    // enforced here, not left to the caller.
+    if (!info.hasJobPosting) {
+      return { ok: false, reason: "no JobPosting schema found on page — likely not a real posting" };
+    }
 
     const now = Date.now();
     let expired = false;
